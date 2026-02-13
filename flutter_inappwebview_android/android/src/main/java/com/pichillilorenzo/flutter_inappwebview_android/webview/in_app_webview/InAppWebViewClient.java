@@ -230,11 +230,11 @@ public class InAppWebViewClient extends WebViewClient {
       inAppBrowserDelegate.didFinishNavigation(url);
     }
 
-    // WebView not storing cookies reliable to local device storage
+    // Cookie flush moved off the main thread to prevent ANR.
+    // CookieManager syncs automatically on a periodic timer;
+    // the explicit flush() is just a write-to-disk hint.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-      CookieManager.getInstance().flush();
-    } else {
-      CookieSyncManager.getInstance().sync();
+      new Thread(() -> CookieManager.getInstance().flush()).start();
     }
 
     String js = JavaScriptBridgeJS.PLATFORM_READY_JS_SOURCE;
