@@ -562,13 +562,21 @@ public class InAppWebViewSettings implements ISettings<InAppWebViewInterface> {
       }
       realSettings.put("fantasyFontFamily", settings.getFantasyFontFamily());
       realSettings.put("fixedFontFamily", settings.getFixedFontFamily());
-      if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-        realSettings.put("forceDark", WebSettingsCompat.getForceDark(settings));
-      } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        realSettings.put("forceDark", settings.getForceDark());
+      try {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+          realSettings.put("forceDark", WebSettingsCompat.getForceDark(settings));
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          realSettings.put("forceDark", settings.getForceDark());
+        }
+      } catch (Exception e) {
+        e.printStackTrace();
       }
-      if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
-        realSettings.put("forceDarkStrategy", WebSettingsCompat.getForceDarkStrategy(settings));
+      try {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+          realSettings.put("forceDarkStrategy", WebSettingsCompat.getForceDarkStrategy(settings));
+        }
+      } catch (Exception e) {
+        e.printStackTrace();
       }
       realSettings.put("layoutAlgorithm", settings.getLayoutAlgorithm().name());
       realSettings.put("loadWithOverviewMode", settings.getLoadWithOverviewMode());
