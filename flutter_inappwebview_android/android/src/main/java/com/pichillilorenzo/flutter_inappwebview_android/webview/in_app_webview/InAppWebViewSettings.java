@@ -86,8 +86,10 @@ public class InAppWebViewSettings implements ISettings<InAppWebViewInterface> {
   public Integer disabledActionModeMenuItems;
   public String fantasyFontFamily = "fantasy";
   public String fixedFontFamily = "monospace";
-  public Integer forceDark = 0; // WebSettingsCompat.FORCE_DARK_OFF
-  public Integer forceDarkStrategy = WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING;
+  @Nullable @Deprecated
+  public Integer forceDark = null;
+  @Nullable @Deprecated
+  public Integer forceDarkStrategy = null;
   public Boolean geolocationEnabled = true;
   public WebSettings.LayoutAlgorithm layoutAlgorithm;
   public Boolean loadWithOverviewMode = true;
