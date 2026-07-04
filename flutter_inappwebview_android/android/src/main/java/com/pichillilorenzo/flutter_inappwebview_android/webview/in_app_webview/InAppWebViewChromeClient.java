@@ -732,12 +732,23 @@ public class InAppWebViewChromeClient extends WebChromeClient implements PluginR
     }
   }
 
+  // CastBrowser fork: only video-detector payloads (marked by detec_checker.js)
+  // may cross the platform channel. Encoding arbitrary page console output in
+  // StandardMessageCodec.writeValue runs on the UI thread and ANRs on sites
+  // that spam megabyte-sized console.log strings (CASTBROWSER-99).
+  private static final int MAX_FORWARDED_CONSOLE_MESSAGE_LENGTH = 2 * 1024 * 1024;
+
   @Override
   public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
     if (inAppWebView != null && inAppWebView.channelDelegate != null) {
-      inAppWebView.channelDelegate.onConsoleMessage(
-              consoleMessage.message(),
-              consoleMessage.messageLevel().ordinal());
+      String message = consoleMessage.message();
+      if (message != null
+              && message.length() <= MAX_FORWARDED_CONSOLE_MESSAGE_LENGTH
+              && (message.contains("\"mcbMessage\"") || message.contains("\"ibMessage\""))) {
+        inAppWebView.channelDelegate.onConsoleMessage(
+                message,
+                consoleMessage.messageLevel().ordinal());
+      }
     }
     return super.onConsoleMessage(consoleMessage);
   }
