@@ -61,6 +61,13 @@ class AndroidWebViewFeature extends PlatformWebViewFeature
 
   Future<dynamic> _handleMethod(MethodCall call) async {}
 
+  /// Starts Chromium using AndroidX's background startup support.
+  /// Await this before feature checks or other WebView APIs for maximum benefit.
+  /// Throws a PlatformException if the provider cannot start or the engine detaches.
+  Future<void> startUpWebView() async {
+    await channel?.invokeMethod<bool>('startUpWebView');
+  }
+
   @override
   Future<bool> isFeatureSupported(WebViewFeature feature) async {
     Map<String, dynamic> args = <String, dynamic>{};

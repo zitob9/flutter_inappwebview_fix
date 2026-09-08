@@ -10,6 +10,7 @@ import androidx.webkit.ServiceWorkerWebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 
 import com.pichillilorenzo.flutter_inappwebview_android.Util;
+import com.pichillilorenzo.flutter_inappwebview_android.WebViewStartup;
 import com.pichillilorenzo.flutter_inappwebview_android.types.BaseCallbackResultImpl;
 import com.pichillilorenzo.flutter_inappwebview_android.types.ChannelDelegateImpl;
 import com.pichillilorenzo.flutter_inappwebview_android.types.SyncBaseCallbackResultImpl;
@@ -33,6 +34,27 @@ public class ServiceWorkerChannelDelegate extends ChannelDelegateImpl {
 
   @Override
   public void onMethodCall(@NonNull MethodCall call, @NonNull MethodChannel.Result result) {
+    ServiceWorkerManager owner = serviceWorkerManager;
+    if (owner == null || owner.plugin == null || owner.plugin.applicationContext == null) {
+      result.error("WEBVIEW_DETACHED", "Service Worker plugin is detached", null);
+      return;
+    }
+    WebViewStartup.start(owner.plugin.applicationContext, error -> {
+      if (serviceWorkerManager != owner || owner.plugin == null) {
+        result.error("WEBVIEW_DETACHED", "Service Worker plugin detached during startup", null);
+      } else if (error != null) {
+        result.error("WEBVIEW_STARTUP_FAILED", error, null);
+      } else {
+        try {
+          handleInitializedMethodCall(call, result);
+        } catch (RuntimeException failure) {
+          result.error("SERVICE_WORKER_ERROR", failure.getMessage(), null);
+        }
+      }
+    });
+  }
+
+  private void handleInitializedMethodCall(@NonNull MethodCall call, @NonNull MethodChannel.Result result) {
     ServiceWorkerManager.init();
     ServiceWorkerControllerCompat serviceWorkerController = ServiceWorkerManager.serviceWorkerController;
     ServiceWorkerWebSettingsCompat serviceWorkerWebSettings = (serviceWorkerController != null) ? 

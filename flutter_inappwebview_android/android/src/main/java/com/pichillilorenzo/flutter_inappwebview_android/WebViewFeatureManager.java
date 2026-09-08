@@ -24,6 +24,21 @@ public class WebViewFeatureManager extends ChannelDelegateImpl {
   @Override
   public void onMethodCall(@NonNull MethodCall call, @NonNull MethodChannel.Result result) {
     switch (call.method) {
+      case "startUpWebView":
+        if (plugin == null || plugin.applicationContext == null) {
+          result.error("WEBVIEW_DETACHED", "WebView plugin is detached", null);
+          break;
+        }
+        WebViewStartup.start(plugin.applicationContext, error -> {
+          if (plugin == null) {
+            result.error("WEBVIEW_DETACHED", "WebView plugin detached during startup", null);
+          } else if (error != null) {
+            result.error("WEBVIEW_STARTUP_FAILED", error, null);
+          } else {
+            result.success(true);
+          }
+        });
+        break;
       case "isFeatureSupported":
         String feature = (String) call.argument("feature");
         result.success(WebViewFeature.isFeatureSupported(feature));
@@ -32,6 +47,8 @@ public class WebViewFeatureManager extends ChannelDelegateImpl {
         if (plugin != null && plugin.activity != null) {
           String startupFeature = (String) call.argument("startupFeature");
           result.success(WebViewFeature.isStartupFeatureSupported(plugin.activity, startupFeature));
+        } else {
+          result.success(false);
         }
         break;
       default:
