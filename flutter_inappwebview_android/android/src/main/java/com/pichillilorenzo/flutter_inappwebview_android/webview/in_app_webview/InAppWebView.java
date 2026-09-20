@@ -703,73 +703,95 @@ final public class InAppWebView extends InputAwareWebView implements InAppWebVie
     WebStorage.getInstance().deleteAllData();
   }
 
-  public void takeScreenshot(final @Nullable Map<String, Object> screenshotConfiguration, final MethodChannel.Result result) {
-    final float pixelDensity = Util.getPixelDensity(getContext());
+  // At most one native screenshot allocation/compression across all tabs. A
+  // busy capture is optional work and returns null instead of retaining bitmaps.
+  private static final java.util.concurrent.atomic.AtomicBoolean screenshotBusy =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
+  private static final java.util.concurrent.ExecutorService screenshotExecutor =
+      new java.util.concurrent.ThreadPoolExecutor(0, 1, 10,
+          java.util.concurrent.TimeUnit.SECONDS,
+          new java.util.concurrent.SynchronousQueue<Runnable>(),
+          work -> new Thread(work, "castbrowser-screenshot"),
+          new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
-    mainLooperHandler.post(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          Bitmap screenshotBitmap = Bitmap.createBitmap(getMeasuredWidth(), getMeasuredHeight(), Bitmap.Config.ARGB_8888);
-          Canvas c = new Canvas(screenshotBitmap);
-          c.translate(-getScrollX(), -getScrollY());
-          draw(c);
-
-          ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-          Bitmap.CompressFormat compressFormat = Bitmap.CompressFormat.PNG;
-          int quality = 100;
-
-          if (screenshotConfiguration != null) {
-            Map<String, Double> rect = (Map<String, Double>) screenshotConfiguration.get("rect");
-            if (rect != null) {
-              int rectX = (int) Math.floor(rect.get("x") * pixelDensity + 0.5);
-              int rectY = (int) Math.floor(rect.get("y") * pixelDensity + 0.5);
-              int rectWidth = Math.min(screenshotBitmap.getWidth(), (int) Math.floor(rect.get("width") * pixelDensity + 0.5));
-              int rectHeight = Math.min(screenshotBitmap.getHeight(), (int) Math.floor(rect.get("height") * pixelDensity + 0.5));
-              screenshotBitmap = Bitmap.createBitmap(
-                      screenshotBitmap,
-                      rectX,
-                      rectY,
-                      rectWidth,
-                      rectHeight);
-            }
-
-            Double snapshotWidth = (Double) screenshotConfiguration.get("snapshotWidth");
-            if (snapshotWidth != null) {
-              int dstWidth = (int) Math.floor(snapshotWidth * pixelDensity + 0.5);
-              float ratioBitmap = (float) screenshotBitmap.getWidth() / (float) screenshotBitmap.getHeight();
-              int dstHeight = (int) ((float) dstWidth / ratioBitmap);
-              screenshotBitmap = Bitmap.createScaledBitmap(screenshotBitmap, dstWidth, dstHeight, true);
-            }
-
-            try {
-              compressFormat = Bitmap.CompressFormat.valueOf((String) screenshotConfiguration.get("compressFormat"));
-            } catch (IllegalArgumentException e) {
-              Log.e(LOG_TAG, "", e);
-            }
-
-            quality = (Integer) screenshotConfiguration.get("quality");
-          }
-
-          screenshotBitmap.compress(
-                  compressFormat,
-                  quality,
-                  byteArrayOutputStream);
-
-          try {
-            byteArrayOutputStream.close();
-          } catch (IOException e) {
-            Log.e(LOG_TAG, "", e);
-          }
-          screenshotBitmap.recycle();
-          result.success(byteArrayOutputStream.toByteArray());
-
-        } catch (IllegalArgumentException e) {
-          Log.e(LOG_TAG, "", e);
-          result.success(null);
+  public void takeScreenshot(final @Nullable Map<String, Object> configuration, final MethodChannel.Result result) {
+    if (!screenshotBusy.compareAndSet(false, true)) {
+      result.success(null);
+      return;
+    }
+    final float density = Util.getPixelDensity(getContext());
+    mainLooperHandler.post(() -> {
+      Bitmap bitmap = null;
+      try {
+        int viewWidth = getMeasuredWidth(), viewHeight = getMeasuredHeight();
+        int x = 0, y = 0, sourceWidth = viewWidth, sourceHeight = viewHeight;
+        if (configuration != null && configuration.get("rect") instanceof Map) {
+          Map<String, Number> rect = (Map<String, Number>) configuration.get("rect");
+          x = screenshotPixels(rect.get("x"), density);
+          y = screenshotPixels(rect.get("y"), density);
+          sourceWidth = screenshotPixels(rect.get("width"), density);
+          sourceHeight = screenshotPixels(rect.get("height"), density);
         }
+        int requestedWidth = Math.min(sourceWidth, viewWidth - x);
+        if (configuration != null && configuration.get("snapshotWidth") instanceof Number) {
+          requestedWidth = screenshotPixels((Number) configuration.get("snapshotWidth"), density);
+        }
+        ScreenshotGeometry geometry = new ScreenshotGeometry(viewWidth, viewHeight,
+            x, y, sourceWidth, sourceHeight, requestedWidth);
+        Bitmap.CompressFormat format = Bitmap.CompressFormat.PNG;
+        int quality = 100;
+        if (configuration != null) {
+          Object configuredFormat = configuration.get("compressFormat");
+          if (configuredFormat instanceof String) {
+            format = Bitmap.CompressFormat.valueOf((String) configuredFormat);
+          }
+          Object configuredQuality = configuration.get("quality");
+          if (configuredQuality instanceof Number) {
+            quality = Math.max(0, Math.min(100, ((Number) configuredQuality).intValue()));
+          }
+        }
+        // View.draw must run on its owning thread. Allocate only the requested
+        // output; never first allocate a full-screen bitmap and a resized copy.
+        bitmap = Bitmap.createBitmap(geometry.width, geometry.height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        canvas.scale((float) geometry.width / geometry.sourceWidth,
+            (float) geometry.height / geometry.sourceHeight);
+        canvas.translate(-getScrollX() - geometry.x, -getScrollY() - geometry.y);
+        draw(canvas);
+        final Bitmap captured = bitmap;
+        final Bitmap.CompressFormat outputFormat = format;
+        final int outputQuality = quality;
+        screenshotExecutor.execute(() -> {
+          byte[] bytes = null;
+          try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            if (captured.compress(outputFormat, outputQuality, output)) {
+              bytes = output.toByteArray();
+            }
+          } catch (Exception | OutOfMemoryError error) {
+            Log.w(LOG_TAG, "Screenshot compression unavailable");
+          } finally {
+            captured.recycle();
+            screenshotBusy.set(false);
+          }
+          // Flutter Result is thread-safe; no View/controller is touched here.
+          result.success(bytes);
+        });
+      } catch (Exception | OutOfMemoryError error) {
+        if (bitmap != null) bitmap.recycle();
+        screenshotBusy.set(false);
+        Log.w(LOG_TAG, "Screenshot capture unavailable");
+        result.success(null);
       }
     });
+  }
+
+  private static int screenshotPixels(Number value, float density) {
+    if (value == null) throw new IllegalArgumentException("Missing screenshot dimension");
+    double pixels = value.doubleValue() * density;
+    if (Double.isNaN(pixels) || Double.isInfinite(pixels) || pixels < 0 || pixels > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("Invalid screenshot dimension");
+    }
+    return (int) Math.floor(pixels + 0.5);
   }
 
   @SuppressLint("RestrictedApi")
