@@ -112,6 +112,11 @@ public class InputAwareWebView extends WebView {
     if (useHybridComposition) {
       return super.checkInputConnectionProxy(view);
     }
+    // Chromium's IME teardown (ImeAdapterImpl.destroyFromNative -> restartInput) can reach this
+    // with a null view. There is no proxy to adopt then, and dereferencing it crashes.
+    if (view == null) {
+      return super.checkInputConnectionProxy(view);
+    }
     // Check to see if the view param is WebView's ThreadedInputConnectionProxyView.
     View previousProxy = threadedInputConnectionProxyView;
     threadedInputConnectionProxyView = view;
